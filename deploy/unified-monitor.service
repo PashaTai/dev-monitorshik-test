@@ -1,0 +1,22 @@
+[Unit]
+Description=Unified Monitor - VK & Telegram Comment Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/path/to/dev-monitorshik-test
+EnvironmentFile=/path/to/dev-monitorshik-test/.env
+ExecStart=/usr/bin/python3 /path/to/dev-monitorshik-test/main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Optional: Set environment variables directly
+# Environment="DB_PATH=/path/to/comments.db"
+# Environment="LOG_DIR=/path/to/logs"
+
+[Install]
+WantedBy=multi-user.target
+

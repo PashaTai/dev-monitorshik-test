@@ -1,0 +1,17 @@
+# Telegram monitoring
+telethon==1.36.0
+aiohttp==3.10.8
+pytz==2024.2
+
+# VK monitoring
+requests>=2.31.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# Configuration
+python-dotenv>=1.0.0
+
+# Utilities
+python-dateutil>=2.8.0
+
