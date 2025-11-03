@@ -155,21 +155,33 @@ async def main():
         logger.info("VK monitor skipped (not configured)")
     
     # Sentiment analysis worker
-    if settings.YANDEX_API_KEY:
+    if settings.YANDEX_API_KEY and settings.YANDEX_FOLDER_ID:
         logger.info("Starting sentiment analysis worker...")
         try:
-            analyzer = YandexSentimentAnalyzer(settings.YANDEX_API_KEY)
+            analyzer = YandexSentimentAnalyzer(
+                settings.YANDEX_API_KEY,
+                settings.YANDEX_FOLDER_ID
+            )
             sentiment_worker = SentimentWorker(
                 db_manager,
                 analyzer,
-                interval=settings.SENTIMENT_INTERVAL
+                interval=settings.SENTIMENT_INTERVAL,
+                bot_token=settings.BOT_TOKEN,
+                alert_chat_id=settings.ALERT_CHAT_ID
             )
             await sentiment_worker.start()
             logger.info("Sentiment worker started")
+            if settings.BOT_TOKEN and settings.ALERT_CHAT_ID:
+                logger.info("  → Notifications enabled (will send after sentiment analysis)")
+            else:
+                logger.info("  → Notifications disabled (BOT_TOKEN or ALERT_CHAT_ID not set)")
         except Exception as e:
             logger.error(f"Failed to start sentiment worker: {e}")
     else:
-        logger.warning("Sentiment analysis worker skipped (YANDEX_API_KEY not set)")
+        if not settings.YANDEX_API_KEY:
+            logger.warning("Sentiment analysis worker skipped (YANDEX_API_KEY not set)")
+        if not settings.YANDEX_FOLDER_ID:
+            logger.warning("Sentiment analysis worker skipped (YANDEX_FOLDER_ID not set)")
     
     # Setup signal handlers
     signal.signal(signal.SIGINT, signal_handler)
@@ -192,7 +204,6 @@ async def main():
         # Stop sentiment worker
         if sentiment_worker:
             await sentiment_worker.stop()
-            await analyzer.close()
         
         # Stop Telegram monitor
         if telegram_monitor:

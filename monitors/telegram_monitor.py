@@ -8,6 +8,7 @@ import os
 import logging
 from datetime import datetime
 from typing import Dict, Optional, Tuple
+from io import BytesIO
 
 import aiohttp
 import pytz
@@ -278,28 +279,10 @@ class TelegramMonitor(BaseMonitor):
                 f"on post {channel_post_id}"
             )
             
-            # Send notification if configured
-            if self.config.get('BOT_TOKEN') and self.config.get('ALERT_CHAT_ID'):
-                # Format time for notification
-                time_str = local_time.strftime("%H:%M %d.%m.%Y")
-                
-                # Format base caption
-                username_part = f" {author_username}" if author_username else ""
-                base_caption = (
-                    f"✈️ <b>TG</b> | {channel_title}\n"
-                    f"👤 {author_name}{username_part}\n"
-                    f"🆔 <code>{author_id}</code>\n"
-                    f"🕐 {time_str}\n"
-                    f"━━━━━━━━━━━━━━━━━━"
-                )
-                
-                # Send notification with media handling
-                if message.media:
-                    await self._handle_media_notification(message, base_caption, post_link)
-                elif comment_text:
-                    await self._send_text_notification(base_caption, comment_text, post_link)
-                else:
-                    await self._send_fallback_notification(base_caption, post_link)
+            # NOTE: Уведомления НЕ отправляются здесь!
+            # Новая логика: комментарий сохранен → sentiment worker обработает → 
+            # → отправит уведомление с тональностью
+            # Это будет реализовано в sentiment worker
         else:
             logger.debug(f"Telegram comment duplicate: {message.id}")
     

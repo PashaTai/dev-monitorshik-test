@@ -298,8 +298,8 @@ class VKMonitor(BaseMonitor):
             post_id = post.get('id')
             post_url = f"https://vk.com/wall{self.owner_id}_{post_id}"
             
-            # Get post date
-            post_date = datetime.fromtimestamp(post.get('date', 0))
+            # Get post date (VK возвращает UTC, добавляем +3 часа для МСК)
+            post_date = datetime.fromtimestamp(post.get('date', 0)) + timedelta(hours=3)
             
             # Get comments
             comments = self._get_post_comments(
@@ -352,8 +352,8 @@ class VKMonitor(BaseMonitor):
                     elif att_type == 'video':
                         media_type = 'video'
                 
-                # Comment date
-                comment_date = datetime.fromtimestamp(comment.get('date', 0))
+                # Comment date (VK возвращает UTC, добавляем +3 часа для МСК)
+                comment_date = datetime.fromtimestamp(comment.get('date', 0)) + timedelta(hours=3)
                 
                 # Comment URL
                 comment_url = f"https://vk.com/wall{self.owner_id}_{post_id}?reply={comment_id}"
@@ -383,17 +383,9 @@ class VKMonitor(BaseMonitor):
                         f"New VK comment saved: {author_name} on post {post_id}"
                     )
                     
-                    # Send notification if configured
-                    bot_token = self.config.get('TELEGRAM_BOT_TOKEN')
-                    chat_id = self.config.get('TELEGRAM_CHAT_ID')
-                    if bot_token and chat_id:
-                        # Форматируем и отправляем уведомление (как в оригинале)
-                        notification = self._format_notification(
-                            comment, post_url, comment_url, self.owner_name
-                        )
-                        if self._send_telegram_notification(notification, bot_token, chat_id):
-                            # Задержка между сообщениями в Telegram (1.2 секунды) - как в оригинале
-                            time.sleep(1.2)
+                    # NOTE: Уведомления НЕ отправляются здесь!
+                    # Новая логика: комментарий сохранен → sentiment worker обработает → 
+                    # → отправит уведомление с тональностью
                 else:
                     logger.debug(f"VK comment duplicate: {comment_id}")
         

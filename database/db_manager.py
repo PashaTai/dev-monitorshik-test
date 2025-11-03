@@ -5,6 +5,7 @@ Handles initialization, table creation, and common operations
 import os
 import logging
 import time
+from typing import Optional
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
@@ -187,8 +188,8 @@ class DatabaseManager:
     def update_sentiment(
         self,
         comment_id: int,
-        sentiment: str,
-        sentiment_score: float,
+        sentiment: Optional[str],
+        sentiment_score: Optional[float],
         processed: int = 1
     ) -> bool:
         """
@@ -196,8 +197,8 @@ class DatabaseManager:
         
         Args:
             comment_id: Database ID of the comment
-            sentiment: 'positive', 'negative', or 'neutral'
-            sentiment_score: Score from 0.0 to 1.0
+            sentiment: 'positive'/'negative'/'neutral' или None (если анализ не выполнен)
+            sentiment_score: Score from 0.0 to 1.0 или None
             processed: Set to 1 after processing
             
         Returns:

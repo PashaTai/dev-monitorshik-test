@@ -35,6 +35,7 @@ class Settings:
     
     # Sentiment analysis
     YANDEX_API_KEY: Optional[str] = os.getenv('YANDEX_API_KEY')
+    YANDEX_FOLDER_ID: Optional[str] = os.getenv('YANDEX_FOLDER_ID')
     SENTIMENT_INTERVAL: int = int(os.getenv('SENTIMENT_INTERVAL', '60'))
     
     # Optional: Telegram Bot (for notifications)
