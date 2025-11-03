@@ -7,16 +7,20 @@
    Откройте `deploy/unified-monitor.service` и измените следующие строки:
    
    - `User=YOUR_USER` - замените на вашего пользователя (например, `ubuntu`, `admin`)
-   - `WorkingDirectory=/path/to/dev-monitorshik-test` - путь к проекту
-   - `EnvironmentFile=/path/to/dev-monitorshik-test/.env` - путь к файлу `.env`
-   - `ExecStart=/usr/bin/python3 /path/to/dev-monitorshik-test/main.py` - путь к Python и main.py
+   - `WorkingDirectory=/home/YOUR_USER/dev-monitorshik-test` - путь к проекту
+   - `Environment="PATH=..."` - путь к venv/bin (важно для использования venv!)
+   - `EnvironmentFile=/home/YOUR_USER/dev-monitorshik-test/.env` - путь к файлу `.env`
+   - `ExecStart=/home/YOUR_USER/dev-monitorshik-test/venv/bin/python ...` - используем Python из venv
+   
+   **ВАЖНО:** Используем Python из venv, а не системный!
    
    Пример:
    ```ini
    User=ubuntu
    WorkingDirectory=/home/ubuntu/dev-monitorshik-test
+   Environment="PATH=/home/ubuntu/dev-monitorshik-test/venv/bin"
    EnvironmentFile=/home/ubuntu/dev-monitorshik-test/.env
-   ExecStart=/usr/bin/python3 /home/ubuntu/dev-monitorshik-test/main.py
+   ExecStart=/home/ubuntu/dev-monitorshik-test/venv/bin/python /home/ubuntu/dev-monitorshik-test/main.py
    ```
 
 2. **Скопируйте service файл в systemd:**
