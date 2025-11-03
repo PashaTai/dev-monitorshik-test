@@ -108,15 +108,31 @@ def validate_comment_text(text: str) -> tuple[bool, Optional[str]]:
     # Проверяем только на специальные символы типа !, ?, #, $ и т.д.
     # Если после удаления всех букв, цифр, пробелов и эмодзи остается больше 50% - это мусор
     # Эмодзи в Unicode обычно в диапазоне 0x1F300-0x1F9FF и других
+    
+    # Убираем эмодзи для проверки
     text_without_emoji = re.sub(
         r'[\U0001F300-\U0001F9FF\U0001FA00-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF\U0001F1E0-\U0001F1FF]',
         '', 
         text_stripped, 
         flags=re.UNICODE
     )
-    text_letters_digits = re.sub(r'[^\w\s]', '', text_without_emoji, flags=re.UNICODE)
-    if len(text_letters_digits) < len(text_without_emoji) * 0.5 and len(text_without_emoji) > 3:
-        return False, "Только специальные символы, недостаточно текста"
+    
+    # Проверяем наличие хотя бы одной буквы или цифры
+    has_letters_or_digits = bool(re.search(r'[a-zA-Zа-яА-ЯёЁ0-9]', text_without_emoji, re.UNICODE))
+    
+    # Если есть буквы/цифры - текст валидный, не блокируем
+    if has_letters_or_digits:
+        # Проверяем что букв/цифр достаточно (больше 30% от текста без эмодзи)
+        text_letters_digits = re.sub(r'[^\w\s]', '', text_without_emoji, flags=re.UNICODE)
+        if len(text_letters_digits) >= 2:  # Хотя бы 2 буквы/цифры достаточно
+            pass  # Валидный текст
+        elif len(text_without_emoji) > 10 and len(text_letters_digits) == 0:
+            # Если текст длинный (>10 символов) но нет букв/цифр - возможно только спецсимволы
+            return False, "Только специальные символы, недостаточно текста"
+    else:
+        # Нет букв и цифр - проверяем длину
+        if len(text_without_emoji) > 3:
+            return False, "Только специальные символы, нет букв/цифр"
     
     # Проверка на слишком длинный текст (более 8000 символов - ограничение API)
     if len(text_stripped) > 8000:
@@ -363,59 +379,84 @@ class SentimentWorker:
                 
                 # Analyze sentiment
                 try:
-                    result = await self.analyzer.analyze_text(comment.comment_text)
+                    # Проверяем: если есть медиа БЕЗ текста - пропускаем анализ
+                    # Во всех остальных случаях пытаемся анализировать
+                    comment_text = comment.comment_text or ''
+                    text_stripped = comment_text.strip()
+                    has_media = comment.has_media == 1
                     
-                    if result:
-                        sentiment, score = result
-                        
-                        # Update in database with successful result
-                        success = self.db_manager.update_sentiment(
-                            comment.id,
-                            sentiment,
-                            score,
-                            processed=1
+                    # Логика: "не определена" только для медиа без текста
+                    # Для всех остальных случаев (с текстом) - всегда пытаемся анализировать
+                    if has_media and not text_stripped:
+                        # Медиа без текста - пропускаем анализ
+                        logger.info(
+                            f"Comment {comment.id} has media without text, "
+                            f"skipping sentiment analysis"
                         )
-                        
-                        if success:
-                            logger.info(
-                                f"Processed comment {comment.id}: "
-                                f"{sentiment} ({score:.2f})"
-                            )
-                            
-                            # Обновляем объект comment для отправки уведомления
-                            comment.sentiment = sentiment
-                            comment.sentiment_score = score
-                            
-                            # Отправляем уведомление с тональностью
-                            if self.bot_token and self.alert_chat_id:
-                                await self._send_notification(comment)
-                        else:
-                            logger.warning(f"Failed to update sentiment for comment {comment.id}")
-                    else:
-                        # Анализ не удался (невалидный текст, ошибка API и т.д.)
-                        # Помечаем как обработанный, но без тональности (sentiment=None)
                         success = self.db_manager.update_sentiment(
                             comment.id,
-                            None,  # sentiment = None означает что анализ не выполнен
+                            None,  # sentiment = None (не определена)
                             None,  # score = None
                             processed=1
                         )
                         
                         if success:
-                            logger.info(
-                                f"Marked comment {comment.id} as processed "
-                                f"(sentiment analysis skipped/failed)"
-                            )
-                            
-                            # Обновляем объект comment для отправки уведомления
                             comment.sentiment = None
                             comment.sentiment_score = None
-                            
-                            # Отправляем уведомление без тональности
                             if self.bot_token and self.alert_chat_id:
                                 await self._send_notification(comment)
+                    else:
+                        # Есть текст - пытаемся анализировать
+                        # Для текстовых сообщений валидация менее строгая
+                        result = await self.analyzer.analyze_text(comment_text)
+                        
+                        if result:
+                            sentiment, score = result
+                            
+                            # Update in database with successful result
+                            success = self.db_manager.update_sentiment(
+                                comment.id,
+                                sentiment,
+                                score,
+                                processed=1
+                            )
+                            
+                            if success:
+                                logger.info(
+                                    f"Processed comment {comment.id}: "
+                                    f"{sentiment} ({score:.2f})"
+                                )
+                                
+                                # Обновляем объект comment для отправки уведомления
+                                comment.sentiment = sentiment
+                                comment.sentiment_score = score
+                                
+                                # Отправляем уведомление с тональностью
+                                if self.bot_token and self.alert_chat_id:
+                                    await self._send_notification(comment)
+                            else:
+                                logger.warning(f"Failed to update sentiment for comment {comment.id}")
                         else:
-                            logger.warning(f"Failed to mark comment {comment.id} as processed")
+                            # Анализ не удался - но для текстовых сообщений это необычно
+                            # Логируем предупреждение и помечаем как обработанный без тональности
+                            logger.warning(
+                                f"Sentiment analysis failed for comment {comment.id} "
+                                f"(text: '{text_stripped[:50]}...')"
+                            )
+                            success = self.db_manager.update_sentiment(
+                                comment.id,
+                                None,  # sentiment = None (не удалось определить)
+                                None,  # score = None
+                                processed=1
+                            )
+                            
+                            if success:
+                                comment.sentiment = None
+                                comment.sentiment_score = None
+                                if self.bot_token and self.alert_chat_id:
+                                    await self._send_notification(comment)
+                            else:
+                                logger.warning(f"Failed to mark comment {comment.id} as processed")
                 
                 except Exception as e:
                     # Критическая ошибка при анализе - помечаем как обработанный без результата

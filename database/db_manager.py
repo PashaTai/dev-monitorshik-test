@@ -255,4 +255,21 @@ class DatabaseManager:
             }
         finally:
             session.close()
+    
+    def get_source_count(self, source: str) -> int:
+        """
+        Get count of comments for a specific source
+        
+        Args:
+            source: Source name ('vk', 'telegram', etc.)
+            
+        Returns:
+            Number of comments from this source
+        """
+        session = self.get_session()
+        try:
+            count = session.query(Comment).filter(Comment.source == source).count()
+            return count
+        finally:
+            session.close()
 

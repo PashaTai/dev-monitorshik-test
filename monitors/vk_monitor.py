@@ -52,6 +52,9 @@ class VKMonitor(BaseMonitor):
         # Thread control
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        
+        # First run flag - для предотвращения отправки уведомлений при первом заполнении БД
+        self._is_first_run = None  # None = не проверено, True/False = проверено
     
     def start(self):
         """Start VK monitoring in background thread"""
@@ -285,6 +288,17 @@ class VKMonitor(BaseMonitor):
         if not self.owner_id:
             return
         
+        # Проверяем первый запуск (если еще не проверяли)
+        if self._is_first_run is None:
+            existing_count = self.db_manager.get_source_count('vk')
+            # Если в БД меньше 20 комментариев - это первый запуск
+            self._is_first_run = existing_count < 20
+            if self._is_first_run:
+                logger.info(
+                    f"First run detected ({existing_count} existing VK comments). "
+                    "Filling database without notifications..."
+                )
+        
         # Get posts
         posts = self._get_wall_posts(self.owner_id, self.posts_to_check)
         
@@ -375,21 +389,42 @@ class VKMonitor(BaseMonitor):
                     author_username=author_username
                 )
                 
+                # При первом запуске помечаем комментарии как обработанные,
+                # чтобы sentiment worker их не трогал и не отправлял уведомления
+                if self._is_first_run:
+                    comment_data['processed'] = 1
+                
                 # Save to database
                 saved = self.save_comment_to_db(comment_data)
                 if saved:
                     new_comments_count += 1
-                    logger.info(
-                        f"New VK comment saved: {author_name} on post {post_id}"
-                    )
+                    if self._is_first_run:
+                        logger.debug(
+                            f"VK comment saved (first run, no notification): "
+                            f"{author_name} on post {post_id}"
+                        )
+                    else:
+                        logger.info(
+                            f"New VK comment saved: {author_name} on post {post_id}"
+                        )
                     
                     # NOTE: Уведомления НЕ отправляются здесь!
                     # Новая логика: комментарий сохранен → sentiment worker обработает → 
                     # → отправит уведомление с тональностью
+                    # При первом запуске комментарии помечаются как processed=1, 
+                    # чтобы sentiment worker их не трогал
                 else:
                     logger.debug(f"VK comment duplicate: {comment_id}")
         
-        if new_comments_count > 0:
+        if self._is_first_run:
+            # После первого прогона снимаем флаг
+            total_count = self.db_manager.get_source_count('vk')
+            self._is_first_run = False
+            logger.info(
+                f"First run complete. Loaded {total_count} VK comments into database. "
+                "Now monitoring for NEW comments..."
+            )
+        elif new_comments_count > 0:
             logger.info(f"Processed {new_comments_count} new VK comments")
     
     def _format_notification(
