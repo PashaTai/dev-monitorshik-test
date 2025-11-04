@@ -313,7 +313,7 @@ class VKMonitor(BaseMonitor):
             post_url = f"https://vk.com/wall{self.owner_id}_{post_id}"
             
             # Get post date (VK возвращает UTC, добавляем +3 часа для МСК)
-            post_date = datetime.fromtimestamp(post.get('date', 0)) + timedelta(hours=3)
+            post_date = datetime.utcfromtimestamp(post.get('date', 0)) + timedelta(hours=3)
             
             # Get comments
             comments = self._get_post_comments(
@@ -367,7 +367,7 @@ class VKMonitor(BaseMonitor):
                         media_type = 'video'
                 
                 # Comment date (VK возвращает UTC, добавляем +3 часа для МСК)
-                comment_date = datetime.fromtimestamp(comment.get('date', 0)) + timedelta(hours=3)
+                comment_date = datetime.utcfromtimestamp(comment.get('date', 0)) + timedelta(hours=3)
                 
                 # Comment URL
                 comment_url = f"https://vk.com/wall{self.owner_id}_{post_id}?reply={comment_id}"
@@ -447,7 +447,7 @@ class VKMonitor(BaseMonitor):
         
         # Comment time (timestamp в секундах) - МОСКОВСКОЕ ВРЕМЯ
         timestamp = comment.get('date', 0)
-        dt = datetime.fromtimestamp(timestamp) + timedelta(hours=3)  # +3 часа для московского времени
+        dt = datetime.utcfromtimestamp(timestamp) + timedelta(hours=3)  # +3 часа для московского времени
         time_str = dt.strftime('%H:%M %d.%m.%Y')
         
         # Comment text
