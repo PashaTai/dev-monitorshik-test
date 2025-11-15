@@ -1,26 +1,31 @@
+# База данных
+comments.db
+comments.db.*
+*.db
+*.db-journal
+
+# Backup файлы
+*.backup.*
+backups/
+
+# Старые подпроекты (вложенные git репозитории)
+monitorshik-tg/
+monitorshik-vk/
+
+# Конфигурация с секретами
+.env
+*.env.local
+
+# Логи
+logs/
+*.log
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
 venv/
 env/
 ENV/
@@ -33,30 +38,10 @@ ENV/
 *.swo
 *~
 
-# Environment variables
-.env
-.env.local
-
-# Database
-*.db
-*.db-journal
-*.db-shm
-*.db-wal
-comments.db*
-
-# Logs
-logs/
-*.log
-
 # OS
 .DS_Store
 Thumbs.db
 
-# Cloned repositories (not part of main project)
-monitorshik-tg/
-monitorshik-vk/
-
-# Session files
-*.session
-*.session-journal
-
+# Temporary files
+*.tmp
+*.temp

@@ -1,57 +1,61 @@
 """
-Yandex Sentiment Analysis API integration using Yandex Cloud ML SDK
+Yandex Sentiment Analysis API integration using Few-shot Text Classification
 """
 import logging
 import asyncio
 import re
+import requests
 from typing import Optional, Tuple
-from yandex_cloud_ml_sdk import YCloudML
 
 logger = logging.getLogger(__name__)
 
 
-def parse_sentiment_result(response_text: str) -> dict:
+def parse_classifier_response(response_json: dict) -> dict:
     """
-    Парсит ответ модели и извлекает тональность и индекс уверенности
+    Парсит ответ Few-shot классификатора
     
     Args:
-        response_text: Текст ответа модели (например, "Негативный 0.9")
+        response_json: JSON ответ от API с predictions
         
     Returns:
         dict: Словарь с полями sentiment (rus), confidence, status
     """
-    # Определяем статус
-    status = "Нет"
-    sentiment = None
-    confidence = None
-    
-    # Ищем слова тональности
-    sentiment_pattern = r"(Негативный|Нейтральный|Позитивный)"
-    match = re.search(sentiment_pattern, response_text, re.IGNORECASE)
-    
-    if match:
-        sentiment = match.group(1)
-        status = "Успешно"
+    try:
+        predictions = response_json.get("predictions", [])
         
-        # Ищем числовое значение уверенности (0.0 - 1.0)
-        confidence_pattern = r"([0-9]\.[0-9]+|[0-9]+)"
-        confidence_match = re.search(confidence_pattern, response_text)
+        if not predictions:
+            return {
+                "sentiment": None,
+                "confidence": None,
+                "status": "Нет"
+            }
         
-        if confidence_match:
-            try:
-                confidence = float(confidence_match.group(1))
-                # Нормализуем значение между 0 и 1
-                if confidence > 1:
-                    confidence = confidence / 10
-                confidence = min(1.0, max(0.0, confidence))
-            except ValueError:
-                confidence = None
+        # Берем предсказание с максимальной уверенностью
+        best_prediction = max(predictions, key=lambda x: x.get("confidence", 0))
+        
+        label = best_prediction.get("label")
+        confidence = best_prediction.get("confidence")
+        
+        if label and confidence is not None:
+            return {
+                "sentiment": label,
+                "confidence": float(confidence),
+                "status": "Успешно"
+            }
+        
+        return {
+            "sentiment": None,
+            "confidence": None,
+            "status": "Нет"
+        }
     
-    return {
-        "sentiment": sentiment,
-        "confidence": confidence,
-        "status": status
-    }
+    except Exception as e:
+        logger.error(f"Error parsing classifier response: {e}")
+        return {
+            "sentiment": None,
+            "confidence": None,
+            "status": "Ошибка"
+        }
 
 
 def convert_sentiment_to_db_format(sentiment_rus: Optional[str]) -> Optional[str]:
@@ -59,17 +63,27 @@ def convert_sentiment_to_db_format(sentiment_rus: Optional[str]) -> Optional[str
     Конвертирует русскую тональность в формат для БД
     
     Args:
-        sentiment_rus: Тональность на русском ("Негативный", "Нейтральный", "Позитивный")
+        sentiment_rus: Тональность на русском ("негативное", "нейтральное", "позитивное")
         
     Returns:
         Тональность в формате БД ('negative', 'neutral', 'positive') или None
     """
+    if not sentiment_rus:
+        return None
+    
+    # Приводим к нижнему регистру для сопоставления
+    sentiment_lower = sentiment_rus.lower().strip()
+    
     mapping = {
-        "Негативный": "negative",
-        "Нейтральный": "neutral",
-        "Позитивный": "positive"
+        "негативное": "negative",
+        "нейтральное": "neutral",
+        "позитивное": "positive",
+        # Поддержка старого формата на всякий случай
+        "негативный": "negative",
+        "нейтральный": "neutral",
+        "позитивный": "positive"
     }
-    return mapping.get(sentiment_rus) if sentiment_rus else None
+    return mapping.get(sentiment_lower)
 
 
 def validate_comment_text(text: str) -> tuple[bool, Optional[str]]:
@@ -93,9 +107,44 @@ def validate_comment_text(text: str) -> tuple[bool, Optional[str]]:
     if not text_stripped:
         return False, "Только пробелы"
     
+    # Расширенный паттерн для эмодзи (покрывает все основные Unicode диапазоны)
+    emoji_pattern = re.compile(
+        r'[\U0001F300-\U0001F9FF'  # Основные эмодзи (включая 👍, 😊 и т.д.)
+        r'\U0001FA00-\U0001FAFF'   # Расширенные эмодзи
+        r'\U00002600-\U000027BF'   # Разное (солнце, звезды и т.д.)
+        r'\U0001F1E0-\U0001F1FF'   # Флаги
+        r'\U00002300-\U000023FF'   # Технические символы
+        r'\U00002B50-\U00002B55'   # ⭐ Звезды
+        r'\U0001F004-\U0001F0CF'   # Игровые символы
+        r'\u2764\uFE0F?'           # ❤ Красное сердце
+        r'\u2665\uFE0F?'           # ♥ Черное сердце
+        r'\u2661\uFE0F?'           # ♡ Белое сердце
+        r'\u2763\uFE0F?'           # ❣ Тяжелое сердце
+        r'\u2744\uFE0F?'           # ❄ Снежинка
+        r'\u2B50'                  # ⭐ Звезда
+        r'\u2705'                  # ✅ Галочка
+        r'\u274C'                  # ❌ Крестик
+        r'\u2714\uFE0F?'           # ✔ Жирная галочка
+        r'\u2716\uFE0F?'           # ✖ Жирный крестик
+        r'\u2728'                  # ✨ Искры
+        r']',
+        flags=re.UNICODE
+    )
+    
+    # Проверяем наличие эмодзи в тексте
+    has_emoji = bool(emoji_pattern.search(text_stripped))
+    
+    # НОВОЕ ПРАВИЛО: Если есть хотя бы один эмодзи - всегда разрешаем анализ
+    if has_emoji:
+        # Few-shot классификатор умеет понимать эмодзи
+        return True, None
+    
     # Проверка на минимальную длину (меньше 3 символов - вероятно мусор)
+    # Эта проверка ПОСЛЕ проверки эмодзи, чтобы не блокировать одиночные эмодзи
     if len(text_stripped) < 3:
         return False, "Слишком короткий текст (< 3 символов)"
+    
+    # Если эмодзи нет - применяем стандартную валидацию
     
     # Проверка на то, что текст состоит только из URL/ссылок
     url_pattern = r'https?://\S+|www\.\S+|t\.me/\S+|vk\.com/\S+'
@@ -103,36 +152,17 @@ def validate_comment_text(text: str) -> tuple[bool, Optional[str]]:
     if len(text_without_urls) < 3:
         return False, "Только ссылки, нет текста для анализа"
     
-    # Проверка на то, что текст состоит только из специальных символов (не эмодзи)
-    # Эмодзи - это валидный контент для анализа тональности
-    # Проверяем только на специальные символы типа !, ?, #, $ и т.д.
-    # Если после удаления всех букв, цифр, пробелов и эмодзи остается больше 50% - это мусор
-    # Эмодзи в Unicode обычно в диапазоне 0x1F300-0x1F9FF и других
-    
-    # Убираем эмодзи для проверки
-    text_without_emoji = re.sub(
-        r'[\U0001F300-\U0001F9FF\U0001FA00-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF\U0001F1E0-\U0001F1FF]',
-        '', 
-        text_stripped, 
-        flags=re.UNICODE
-    )
-    
     # Проверяем наличие хотя бы одной буквы или цифры
-    has_letters_or_digits = bool(re.search(r'[a-zA-Zа-яА-ЯёЁ0-9]', text_without_emoji, re.UNICODE))
+    has_letters_or_digits = bool(re.search(r'[a-zA-Zа-яА-ЯёЁ0-9]', text_without_urls, re.UNICODE))
     
-    # Если есть буквы/цифры - текст валидный, не блокируем
-    if has_letters_or_digits:
-        # Проверяем что букв/цифр достаточно (больше 30% от текста без эмодзи)
-        text_letters_digits = re.sub(r'[^\w\s]', '', text_without_emoji, flags=re.UNICODE)
-        if len(text_letters_digits) >= 2:  # Хотя бы 2 буквы/цифры достаточно
-            pass  # Валидный текст
-        elif len(text_without_emoji) > 10 and len(text_letters_digits) == 0:
-            # Если текст длинный (>10 символов) но нет букв/цифр - возможно только спецсимволы
-            return False, "Только специальные символы, недостаточно текста"
-    else:
-        # Нет букв и цифр - проверяем длину
-        if len(text_without_emoji) > 3:
-            return False, "Только специальные символы, нет букв/цифр"
+    if not has_letters_or_digits:
+        # Нет букв, цифр и эмодзи - только спецсимволы
+        return False, "Только специальные символы, нет букв/цифр"
+    
+    # Проверяем что букв/цифр достаточно
+    text_letters_digits = re.sub(r'[^\w\s]', '', text_without_urls, flags=re.UNICODE)
+    if len(text_letters_digits) < 2:
+        return False, "Недостаточно текста для анализа"
     
     # Проверка на слишком длинный текст (более 8000 символов - ограничение API)
     if len(text_stripped) > 8000:
@@ -142,11 +172,11 @@ def validate_comment_text(text: str) -> tuple[bool, Optional[str]]:
 
 
 class YandexSentimentAnalyzer:
-    """Yandex sentiment analysis API client using Yandex Cloud ML SDK"""
+    """Yandex sentiment analysis using Few-shot Text Classification API"""
     
     def __init__(self, api_key: str, folder_id: str):
         """
-        Initialize Yandex sentiment analyzer
+        Initialize Yandex sentiment analyzer with Few-shot classifier
         
         Args:
             api_key: Yandex API key
@@ -154,44 +184,53 @@ class YandexSentimentAnalyzer:
         """
         self.api_key = api_key
         self.folder_id = folder_id
+        self.api_url = "https://llm.api.cloud.yandex.net/foundationModels/v1/fewShotTextClassification"
         
-        # Инициализация SDK
-        self.sdk = YCloudML(
-            folder_id=folder_id,
-            auth=api_key
-        )
+        # Подготовка примеров для Few-shot классификации
+        self.samples = [
+            {
+                "text": "Отличный сервис, всё понравилось! Буду рекомендовать друзьям",
+                "label": "позитивное"
+            },
+            {
+                "text": "Супер! Молодцы! Так держать 👍",
+                "label": "позитивное"
+            },
+            {
+                "text": "Очень хорошо получилось! Спасибо большое",
+                "label": "позитивное"
+            },
+            {
+                "text": "Ужасное обслуживание, потерял время и деньги",
+                "label": "негативное"
+            },
+            {
+                "text": "Полный провал, очень разочарован",
+                "label": "негативное"
+            },
+            {
+                "text": "Не могу понять зачем это нужно, только время тратится",
+                "label": "негативное"
+            },
+            {
+                "text": "Обычный магазин, ничего особенного",
+                "label": "нейтральное"
+            },
+            {
+                "text": "Товар соответствует описанию",
+                "label": "нейтральное"
+            },
+            {
+                "text": "Видел, принял к сведению",
+                "label": "нейтральное"
+            }
+        ]
         
-        # Выбор модели и настройка
-        self.model = self.sdk.models.completions("yandexgpt", model_version="rc")
-        self.model = self.model.configure(temperature=0.3)
-        
-        logger.info("Yandex Sentiment Analyzer initialized with SDK")
-    
-    def _get_system_prompt_template(self) -> str:
-        """
-        Возвращает шаблон системного промпта с плейсхолдером для текста комментария
-        
-        Returns:
-            Шаблон промпта с плейсхолдером {comment_text}
-        """
-        return """Ты ИИ агент, мониторщик разметки тональности комментариев в социальных сетях, я буду давать тебе на вход текстовый комментарий, а ты выводить тональность этого комментария оценивая лексику, посыл и смысл этого комментария. 
-
-есть три тональности комментария
-Негативный
-Нейтральный
-Позитивный 
-
-Вторая составляющая твоего ответа - это оценка насколько ты уверен что это именно такая тональность по шкале где ближе к 1 уверен, ближе к 0 не уверен
-
-Твой ответ должен быть формата, пример 
-Негативный 0.9
-
-Текст комментария для анализа:
-{comment_text}"""
+        logger.info("Yandex Sentiment Analyzer initialized with Few-shot Classifier")
     
     async def analyze_text(self, text: str) -> Optional[Tuple[str, float]]:
         """
-        Analyze sentiment of text using Yandex GPT
+        Analyze sentiment of text using Yandex Few-shot classifier
         
         Args:
             text: Text to analyze
@@ -207,39 +246,32 @@ class YandexSentimentAnalyzer:
             logger.warning(f"Invalid comment text for sentiment analysis: {reason}")
             return None
         
-        # Получаем шаблон промпта и подставляем текст комментария в плейсхолдер
-        prompt_template = self._get_system_prompt_template()
+        # Формируем запрос к Few-shot классификатору
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Api-Key {self.api_key}"
+        }
         
-        # Убеждаемся, что текст комментария подставлен в плейсхолдер
-        try:
-            system_prompt = prompt_template.format(comment_text=text.strip())
-        except KeyError as e:
-            logger.error(f"Error formatting prompt template: missing placeholder {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Error formatting prompt template: {e}")
-            return None
-        
-        # Проверяем, что подстановка произошла
-        if "{comment_text}" in system_prompt:
-            logger.error("Placeholder {comment_text} was not replaced in prompt!")
-            return None
-        
-        messages = [
-            {
-                "role": "system",
-                "text": system_prompt
-            }
-        ]
+        data = {
+            "modelUri": f"cls://{self.folder_id}/yandexgpt-lite",
+            "taskDescription": "Определи тональность комментария в социальных сетях: позитивное, негативное или нейтральное",
+            "labels": [
+                "позитивное",
+                "негативное",
+                "нейтральное"
+            ],
+            "text": text.strip(),
+            "samples": self.samples
+        }
         
         try:
-            # SDK работает синхронно, оборачиваем в executor для async
+            # Выполняем синхронный запрос в executor для async
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, self._call_model, messages)
+            result = await loop.run_in_executor(None, self._call_classifier, headers, data)
             
             if result:
-                # Парсим результат
-                parsed = parse_sentiment_result(result)
+                # Парсим ответ
+                parsed = parse_classifier_response(result)
                 
                 if parsed["status"] == "Успешно" and parsed["sentiment"] and parsed["confidence"] is not None:
                     # Конвертируем в формат БД
@@ -253,37 +285,53 @@ class YandexSentimentAnalyzer:
                         logger.warning(f"Could not convert sentiment: {parsed['sentiment']}")
                         return None
                 else:
-                    logger.warning(f"Failed to parse sentiment result: {result}")
+                    logger.warning(f"Failed to parse classifier result: {parsed}")
                     return None
             else:
-                logger.warning("Empty result from Yandex GPT")
+                logger.warning("Empty result from Yandex Classifier")
                 return None
                 
         except Exception as e:
             logger.error(f"Error in sentiment analysis: {e}", exc_info=True)
             return None
     
-    def _call_model(self, messages: list) -> Optional[str]:
+    def _call_classifier(self, headers: dict, data: dict) -> Optional[dict]:
         """
-        Синхронный вызов модели (выполняется в executor)
+        Синхронный вызов Few-shot классификатора (выполняется в executor)
         
         Args:
-            messages: Список сообщений для модели
+            headers: HTTP заголовки
+            data: Данные запроса
             
         Returns:
-            Текст ответа модели или None при ошибке
+            JSON ответ или None при ошибке
         """
         try:
-            result = self.model.run(messages)
-            for alternative in result:
-                return alternative.text
+            response = requests.post(
+                self.api_url,
+                headers=headers,
+                json=data,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(
+                    f"Classifier API error: status {response.status_code}, "
+                    f"response: {response.text}"
+                )
+                return None
+                
+        except requests.exceptions.Timeout:
+            logger.error("Request to classifier API timed out")
             return None
         except Exception as e:
-            logger.error(f"Error calling Yandex GPT model: {e}", exc_info=True)
+            logger.error(f"Error calling classifier API: {e}", exc_info=True)
             return None
     
     async def close(self):
-        """Close analyzer (no-op for SDK, kept for compatibility)"""
+        """Close analyzer (no-op, kept for compatibility)"""
         pass
 
 

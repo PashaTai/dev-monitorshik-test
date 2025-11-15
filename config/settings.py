@@ -45,6 +45,17 @@ class Settings:
     # Logging
     LOG_DIR: str = os.getenv('LOG_DIR', 'logs')
     
+    # API Server (for manual labeling)
+    API_HOST: str = os.getenv('API_HOST', '0.0.0.0')
+    API_PORT: int = int(os.getenv('API_PORT', '8000'))
+    API_URL: str = os.getenv('API_URL', 'http://localhost:8000')
+    API_USERNAME: str = os.getenv('API_USERNAME', 'admin')
+    API_PASSWORD: str = os.getenv('API_PASSWORD', 'changeme')
+    
+    # Dashboard
+    DASHBOARD_PASSWORD: str = os.getenv('DASHBOARD_PASSWORD', 'admin123')
+    DASHBOARD_PORT: int = int(os.getenv('DASHBOARD_PORT', '8501'))
+    
     @classmethod
     def load(cls):
         """Load settings from environment"""
