@@ -13,6 +13,7 @@ import base64
 import requests
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 
@@ -505,11 +506,7 @@ def render_header(db_path: Path) -> None:
         layout="wide",
         page_icon="📊",
     )
-    st.title("Unified Monitor — дашборд комментариев")
-    st.caption(
-        f"Источник данных: `{db_path}`. "
-        "Настройте путь и фильтры в левом сайдбаре."
-    )
+    st.title("Мониторинг комментариев")
 
 
 def sidebar_controls(default_db_path: Path) -> tuple[Path, tuple[datetime, datetime], str]:
@@ -629,7 +626,7 @@ def kpi_section(df: pd.DataFrame) -> None:
     neutral = int(sentiments.get("neutral", 0))
     undefined = int(sentiments.get("undefined", 0))
 
-    st.subheader("Сводка по тональностям")
+    st.subheader("Сводка по тональности комментариев")
     col_total, col_pos, col_neg, col_neu, col_undef = st.columns(5)
     col_total.metric("Всего комментариев", f"{total_comments:,}".replace(",", " "))
     col_pos.metric("Позитивных", positive, help="Количество комментариев с тональностью 'positive'")
@@ -842,7 +839,7 @@ def post_summary_section(
 
 
 def raw_data_section(df: pd.DataFrame) -> None:
-    st.subheader("Raw Data")
+    st.subheader("Данные в виде таблицы")
     raw_table = prepare_raw_table(df)
 
     if raw_table.empty:
@@ -851,12 +848,17 @@ def raw_data_section(df: pd.DataFrame) -> None:
 
     st.dataframe(raw_table, use_container_width=True, hide_index=True)
 
-    csv_data = raw_table.to_csv(index=False).encode("utf-8")
+    # Создаем Excel файл в памяти
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        raw_table.to_excel(writer, index=False, sheet_name="Комментарии")
+    excel_data = output.getvalue()
+
     st.download_button(
-        "Скачать CSV",
-        data=csv_data,
-        file_name="comments_export.csv",
-        mime="text/csv",
+        "Скачать Excel",
+        data=excel_data,
+        file_name="comments_export.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 
@@ -1158,16 +1160,6 @@ def main() -> None:
     if df.empty:
         st.warning("Не найдено комментариев для выбранных фильтров.")
         return
-
-    with st.expander("Текущие фильтры", expanded=False):
-        start_dt, end_dt = selected_range
-        st.write(
-            f"Период: {start_dt.strftime('%d.%m.%Y')} — {end_dt.strftime('%d.%m.%Y')}"
-        )
-        st.write(
-            "Площадка: "
-            + ("Все" if selected_source == "all" else selected_source.capitalize())
-        )
 
     kpi_section(df)
     daily_histogram_section(df)
