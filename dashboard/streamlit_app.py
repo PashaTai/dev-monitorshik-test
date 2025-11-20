@@ -568,7 +568,7 @@ def load_comments_batch(
 
 def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
     """
-    Секция для ручной разметки неопределенной тональности
+    Секция для ручной разметки неопределенной тональности (упрощенная версия)
     
     Args:
         selected_range: Выбранный период (start_datetime, end_datetime)
@@ -582,174 +582,155 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
     
     start_dt, end_dt = selected_range
     
-    # Инициализация session state для пачки комментариев
-    if "comments_batch" not in st.session_state:
-        st.session_state["comments_batch"] = []
-    if "batch_index" not in st.session_state:
-        st.session_state["batch_index"] = 0
-    if "labeled_in_batch" not in st.session_state:
-        st.session_state["labeled_in_batch"] = set()
+    # Инициализация session state
+    if "undefined_comments" not in st.session_state:
+        st.session_state["undefined_comments"] = []
+    if "current_comment_index" not in st.session_state:
+        st.session_state["current_comment_index"] = 0
+    if "need_reload" not in st.session_state:
+        st.session_state["need_reload"] = True
     
-    # Кнопка для загрузки новой пачки и статус
-    col_load, col_status = st.columns([1, 3])
-    
-    with col_load:
-        load_batch = st.button("🔄 Загрузить новую пачку (50 шт)", use_container_width=True)
-    
-    # Логика загрузки пачки
-    if load_batch or not st.session_state["comments_batch"]:
+    # Автоматически загружаем комментарии при первом входе или по запросу
+    if st.session_state["need_reload"]:
         comments = load_comments_batch(
             api_url, api_username, api_password,
             start_dt.strftime("%Y-%m-%d"),
             end_dt.strftime("%Y-%m-%d"),
-            limit=50
+            limit=1000  # Загружаем все неразмеченные (до 1000)
         )
-        if comments:
-            st.session_state["comments_batch"] = comments
-            st.session_state["batch_index"] = 0
-            st.session_state["labeled_in_batch"] = set()
-            if load_batch:  # Показываем сообщение только если пользователь нажал кнопку
-                st.success(f"✅ Загружена новая пачка: {len(comments)} комментариев")
-            st.rerun()
-        elif load_batch:  # Если нажали кнопку, но комментариев нет
-            st.success("✅ Нет неразмеченных комментариев за выбранный период!")
-            st.session_state["comments_batch"] = []
-            return
+        st.session_state["undefined_comments"] = comments
+        st.session_state["current_comment_index"] = 0
+        st.session_state["need_reload"] = False
             
-    # Если пачка пуста (и не загрузилась)
-    if not st.session_state["comments_batch"]:
-        st.info("👆 Нажмите кнопку 'Загрузить новую пачку' для начала разметки")
-        return
-
-    # Получаем текущую пачку
-    batch = st.session_state["comments_batch"]
-    current_idx = st.session_state["batch_index"]
-    labeled_ids = st.session_state["labeled_in_batch"]
+    # Получаем список комментариев
+    undefined_comments = st.session_state["undefined_comments"]
     
-    # Статус пачки
-    with col_status:
-        labeled_count = len(labeled_ids)
-        total_count = len(batch)
-        st.metric(
-            "Прогресс пачки",
-            f"{labeled_count} / {total_count}",
-            f"Размечено",
-            help="Количество размеченных комментариев в текущей пачке"
-        )
-    
-    # Если прошли всю пачку
-    if current_idx >= len(batch):
-        st.success(f"✅ Вы прошли всю пачку из {len(batch)} комментариев!")
-        st.info(f"📊 Размечено: {labeled_count} комментариев")
-        
-        if st.button("📥 Загрузить следующие 50 комментариев", use_container_width=True):
-            st.session_state["comments_batch"] = []
-            st.session_state["batch_index"] = 0
-            st.session_state["labeled_in_batch"] = set()
+    if not undefined_comments:
+        st.success("✅ Все комментарии в выбранном периоде размечены!")
+        if st.button("🔄 Обновить список", use_container_width=True):
+            st.session_state["need_reload"] = True
             st.rerun()
         return
 
-    comment = batch[current_idx]
+    current_idx = st.session_state["current_comment_index"]
+    total_count = len(undefined_comments)
+    
+    # Если индекс вышел за пределы
+    if current_idx >= total_count:
+        st.success(f"✅ Все {total_count} комментариев просмотрены!")
+        if st.button("🔄 Обновить список", use_container_width=True):
+            st.session_state["need_reload"] = True
+            st.rerun()
+        return
+
+    comment = undefined_comments[current_idx]
     comment_id = comment['id']
     
-    # Прогресс бар для текущего положения в пачке (фиксированный размер)
+    # Прогресс бар
     st.progress(
-        current_idx / len(batch), 
-        text=f"Просмотрено: {current_idx + 1} из {len(batch)} комментариев в пачке"
+        current_idx / total_count, 
+        text=f"Комментарий {current_idx + 1} из {total_count}"
     )
     
-    # Показываем статус разметки
-    if comment_id in labeled_ids:
-        st.success("✅ Этот комментарий уже размечен в текущей пачке")
-    
-    # Карточка комментария
+    # Карточка комментария (упрощенная)
     with st.container():
         st.markdown("---")
         
-        col_info1, col_info2 = st.columns(2)
-        with col_info1:
-            st.markdown(f"**ID:** {comment['id']}")
-            st.markdown(f"**Источник:** {comment['source'].upper()}")
-            st.markdown(f"**Автор:** {comment['author_name']}")
+        # Площадка
+        source_emoji = {"telegram": "✈️ Telegram", "vk": "🔵 VK"}
+        st.markdown(f"**Площадка:** {source_emoji.get(comment['source'], comment['source'])}")
         
-        with col_info2:
-            st.markdown(f"**Канал/Группа:** {comment['group_channel_name']}")
-            try:
-                comment_date = datetime.fromisoformat(comment['comment_published_at'].replace('Z', '+00:00'))
-                st.markdown(f"**Дата:** {comment_date.strftime('%d.%m.%Y %H:%M')}")
-            except (ValueError, AttributeError):
-                st.markdown(f"**Дата:** {comment.get('comment_published_at', 'N/A')}")
+        # Автор (со ссылкой если есть username)
+        author_name = comment['author_name']
+        author_username = comment.get('author_username')
+        if author_username:
+            # Формируем ссылку на профиль
+            if comment['source'] == 'telegram':
+                if author_username.startswith('@'):
+                    profile_link = f"https://t.me/{author_username[1:]}"
+                else:
+                    profile_link = f"https://t.me/{author_username}"
+            else:  # VK
+                if author_username.startswith('@'):
+                    profile_link = f"https://vk.com/{author_username[1:]}"
+                else:
+                    profile_link = f"https://vk.com/{author_username}"
+            st.markdown(f"**Автор:** [{author_name}]({profile_link})")
+        else:
+            st.markdown(f"**Автор:** {author_name}")
+        
+        # Дата
+        try:
+            comment_date = datetime.fromisoformat(comment['comment_published_at'].replace('Z', '+00:00'))
+            st.markdown(f"**Дата:** {comment_date.strftime('%d.%m.%Y %H:%M')}")
+        except (ValueError, AttributeError):
+            st.markdown(f"**Дата:** {comment.get('comment_published_at', 'N/A')}")
         
         st.markdown("---")
         
-        # Отображение текста или медиа
+        # Отображение содержимого
         comment_text = comment.get('comment_text', '').strip()
         has_media = comment.get('has_media', 0) == 1
         media_type = comment.get('media_type')
         
         if comment_text:
-            # Есть текст - показываем
-            st.markdown("**Текст комментария:**")
+            # Есть текст
+            st.markdown("**Содержание:**")
             st.info(comment_text)
             
             # Если есть медиа - показываем иконку
             if has_media and media_type:
                 media_icons = {
                     'photo': '📷 Фото',
-                    'video': '🎬 Видео',
                     'sticker': '🎨 Стикер',
-                    'voice': '🎤 Голосовое сообщение'
+                    'video': '🎬 Видео',
+                    'voice': '🎤 Аудио'
                 }
-                media_text = media_icons.get(media_type, f'📎 Медиа ({media_type})')
-                st.caption(f"*+ {media_text} (см. ссылку ниже)*")
+                icon_text = media_icons.get(media_type, '📎 Медиа')
+                
+                # Для видео и аудио - ссылка обязательна
+                if media_type in ['video', 'voice']:
+                    link_text = "на комментарий" if comment['source'] == 'vk' else "на пост"
+                    st.caption(f"*+ {icon_text} — [посмотреть {link_text}]({comment['comment_url']})*")
+                else:
+                    st.caption(f"*+ {icon_text}*")
         else:
             # Нет текста - только медиа
-            if has_media and media_type:
+            if has_media:
                 media_display = {
-                    'photo': ('📷', 'Фотография'),
-                    'video': ('🎬', 'Видео'),
+                    'photo': ('📷', 'Фото'),
                     'sticker': ('🎨', 'Стикер'),
-                    'voice': ('🎤', 'Голосовое сообщение')
+                    'video': ('🎬', 'Видео'),
+                    'voice': ('🎤', 'Аудио')
                 }
-                icon, name = media_display.get(media_type, ('📎', f'Медиа ({media_type})'))
+                icon, name = media_display.get(media_type, ('📎', 'Медиа'))
                 
-                # Большая карточка для медиа
-                st.warning(f"### {icon} {name}")
-                st.markdown("*Комментарий содержит только медиа-вложение без текста*")
-                st.markdown("**Для просмотра и разметки откройте комментарий по ссылке ниже ⬇️**")
-            elif has_media:
-                # Есть медиа, но тип неизвестен
-                st.warning("### 📎 Медиа-вложение")
-                st.markdown("*Комментарий содержит медиа-вложение*")
-                st.markdown("**Для просмотра откройте комментарий по ссылке ниже ⬇️**")
+                # Определяем ссылку
+                link_text = "на комментарий" if comment['source'] == 'vk' else "на пост"
+                link_url = comment['comment_url']
+                
+                st.warning(f"**{icon} {name}** — [посмотреть {link_text}]({link_url})")
             else:
-                # Нет ни текста, ни медиа
-                st.error("⚠️ Пустой комментарий (нет текста и медиа)")
-
-        st.markdown("---")
-        
-        # Ссылки - делаем кнопки большими и заметными
-        col_link1, col_link2 = st.columns(2)
-        with col_link1:
-            st.link_button("🔗 Открыть пост", comment['post_url'], use_container_width=True)
-        with col_link2:
-            st.link_button("💬 Открыть комментарий", comment['comment_url'], use_container_width=True, type="primary")
+                st.error("⚠️ Пустой комментарий")
         
         st.markdown("---")
         
-        # Кнопки выбора тональности
+        # Кнопки выбора тональности (только 3)
         st.markdown("### Выберите тональность:")
-        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("🟢 Позитивный", key=f"pos_{comment_id}", use_container_width=True):
+            if st.button("🟢 Позитивный", key=f"pos_{comment_id}", use_container_width=True, type="primary"):
                 if update_sentiment_via_api(
                     api_url, comment_id, "positive", 
                     api_username, api_password
                 ):
-                    st.toast("✅ Размечено: Позитивный")
-                    st.session_state["labeled_in_batch"].add(comment_id)
-                    st.session_state["batch_index"] = min(current_idx + 1, len(batch) - 1)
+                    # Удаляем из списка и переходим к следующему
+                    st.session_state["undefined_comments"].pop(current_idx)
+                    # Индекс остается тем же, так как следующий элемент сдвинулся на место текущего
+                    if current_idx >= len(st.session_state["undefined_comments"]):
+                        st.session_state["current_comment_index"] = max(0, len(st.session_state["undefined_comments"]) - 1)
+                    st.toast("✅ Позитивный")
                     st.rerun()
         
         with col2:
@@ -758,47 +739,44 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
                     api_url, comment_id, "neutral",
                     api_username, api_password
                 ):
-                    st.toast("✅ Размечено: Нейтральный")
-                    st.session_state["labeled_in_batch"].add(comment_id)
-                    st.session_state["batch_index"] = min(current_idx + 1, len(batch) - 1)
+                    st.session_state["undefined_comments"].pop(current_idx)
+                    if current_idx >= len(st.session_state["undefined_comments"]):
+                        st.session_state["current_comment_index"] = max(0, len(st.session_state["undefined_comments"]) - 1)
+                    st.toast("✅ Нейтральный")
                     st.rerun()
         
         with col3:
-            if st.button("🔴 Негативный", key=f"neg_{comment_id}", use_container_width=True):
+            if st.button("🔴 Негативный", key=f"neg_{comment_id}", use_container_width=True, type="primary"):
                 if update_sentiment_via_api(
                     api_url, comment_id, "negative",
                     api_username, api_password
                 ):
-                    st.toast("✅ Размечено: Негативный")
-                    st.session_state["labeled_in_batch"].add(comment_id)
-                    st.session_state["batch_index"] = min(current_idx + 1, len(batch) - 1)
+                    st.session_state["undefined_comments"].pop(current_idx)
+                    if current_idx >= len(st.session_state["undefined_comments"]):
+                        st.session_state["current_comment_index"] = max(0, len(st.session_state["undefined_comments"]) - 1)
+                    st.toast("✅ Негативный")
                     st.rerun()
         
-        with col4:
-            if st.button("⏭️ Пропустить", key=f"skip_{comment_id}", use_container_width=True):
-                st.session_state["batch_index"] = min(current_idx + 1, len(batch) - 1)
-                st.rerun()
-        
-        # Навигация
+        # Навигация (Предыдущий / Следующий)
         st.markdown("---")
         nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
         
         with nav_col1:
             if st.button("⬅️ Предыдущий", disabled=(current_idx == 0), use_container_width=True):
-                st.session_state["batch_index"] = current_idx - 1
+                st.session_state["current_comment_index"] = current_idx - 1
                 st.rerun()
         
         with nav_col2:
             st.markdown(
                 f"<div style='text-align: center; padding-top: 8px; color: #888;'>"
-                f"Комментарий {current_idx + 1} из {len(batch)}"
+                f"{current_idx + 1} / {total_count}"
                 f"</div>", 
                 unsafe_allow_html=True
             )
         
         with nav_col3:
-            if st.button("Следующий ➡️", disabled=(current_idx >= len(batch) - 1), use_container_width=True):
-                st.session_state["batch_index"] = current_idx + 1
+            if st.button("Следующий ➡️", disabled=(current_idx >= total_count - 1), use_container_width=True):
+                st.session_state["current_comment_index"] = current_idx + 1
                 st.rerun()
 
 
