@@ -313,14 +313,25 @@ def calculate_period_change(
         metric: 'total' для всех комментариев, 'negative' для негативных
         
     Returns:
-        Изменение в процентах (положительное или отрицательное) или None
+        Абсолютное изменение (положительное или отрицательное) или None
     """
     start_dt, end_dt = date_range
-    period_length = (end_dt - start_dt).days + 1  # +1 чтобы включить оба дня
+    
+    # Вычисляем длину периода (в днях)
+    # Если одна дата - период = 1 день
+    if start_dt.date() == end_dt.date():
+        period_length = 1
+    else:
+        period_length = (end_dt.date() - start_dt.date()).days + 1
     
     # Предыдущий период (такой же длины)
-    prev_end = start_dt - timedelta(days=1)
-    prev_start = prev_end - timedelta(days=period_length - 1)
+    # Для одного дня: предыдущий день
+    if period_length == 1:
+        prev_end = datetime.combine(start_dt.date() - timedelta(days=1), datetime.max.time())
+        prev_start = datetime.combine(prev_end.date(), datetime.min.time())
+    else:
+        prev_end = start_dt - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=period_length - 1)
     
     # Получаем данные за текущий период
     current_df = fetch_comments_dataframe(engine, date_range, source)
@@ -337,7 +348,7 @@ def calculate_period_change(
     else:
         return None
     
-    if prev_count == 0:
+    if prev_count == 0 and current_count == 0:
         return None  # Нет данных для сравнения
     
     # Возвращаем абсолютное изменение
@@ -592,12 +603,20 @@ def post_summary_section(
         with col1:
             st.markdown("**Больше всего комментариев**")
             if top_comment:
-                st.metric(
-                    label=top_comment.group_channel_name,
-                    value=f"{top_comment.comment_count}",
-                    delta=comment_change,
-                    help="Учитываются только прямые комментарии к постам (без ответов на комментарии)",
-                )
+                # Показываем метрику с delta только если есть данные для сравнения
+                if comment_change is not None:
+                    st.metric(
+                        label=top_comment.group_channel_name,
+                        value=f"{top_comment.comment_count}",
+                        delta=comment_change,
+                        help="Учитываются только прямые комментарии к постам (без ответов на комментарии). Delta показывает изменение общего количества комментариев за период.",
+                    )
+                else:
+                    st.metric(
+                        label=top_comment.group_channel_name,
+                        value=f"{top_comment.comment_count}",
+                        help="Учитываются только прямые комментарии к постам (без ответов на комментарии)",
+                    )
                 st.link_button(
                     "🔗 Перейти к посту",
                     top_comment.post_url,
@@ -609,12 +628,20 @@ def post_summary_section(
         with col2:
             st.markdown("**Больше всего негатива**")
             if top_negative:
-                st.metric(
-                    label=top_negative.group_channel_name,
-                    value=f"{top_negative.negative_count}",
-                    delta=negative_change,
-                    delta_color="inverse",
-                )
+                # Показываем метрику с delta только если есть данные для сравнения
+                if negative_change is not None:
+                    st.metric(
+                        label=top_negative.group_channel_name,
+                        value=f"{top_negative.negative_count}",
+                        delta=negative_change,
+                        delta_color="inverse",
+                        help="Delta показывает изменение общего количества негативных комментариев за период.",
+                    )
+                else:
+                    st.metric(
+                        label=top_negative.group_channel_name,
+                        value=f"{top_negative.negative_count}",
+                    )
                 st.link_button(
                     "🔗 Перейти к посту",
                     top_negative.post_url,
