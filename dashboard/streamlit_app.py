@@ -9,6 +9,7 @@ initialising Streamlit.
 from __future__ import annotations
 
 import os
+import base64
 import requests
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -24,6 +25,70 @@ from sqlalchemy.orm import Session
 
 from config.settings import Settings
 from database.models import Comment
+
+
+# -----------------------------------------------------------------------------
+# Helper functions for source logos
+# -----------------------------------------------------------------------------
+
+
+def get_source_with_logo_html(source_key: str) -> str:
+    """
+    Возвращает HTML строку с логотипом источника и текстом
+    
+    Args:
+        source_key: 'vk' или 'telegram'
+    
+    Returns:
+        HTML строка с логотипом и текстом
+    """
+    logo_paths = {
+        "vk": Path(__file__).parent.parent / "vk-logo.svg",
+        "telegram": Path(__file__).parent.parent / "telegram-logo.svg",
+    }
+    
+    texts = {
+        "vk": "ВКонтакте",
+        "telegram": "Телеграм",
+    }
+    
+    if source_key not in logo_paths:
+        return texts.get(source_key, source_key)
+    
+    logo_path = logo_paths[source_key]
+    text = texts[source_key]
+    
+    if not logo_path.exists():
+        return text
+    
+    # Читаем SVG файл
+    with open(logo_path, "r", encoding="utf-8") as f:
+        svg_content = f.read()
+    
+    # Конвертируем SVG в base64
+    svg_base64 = base64.b64encode(svg_content.encode("utf-8")).decode("utf-8")
+    
+    # Создаем HTML с логотипом и текстом
+    html = f'<div style="display: flex; align-items: center; gap: 8px;"><img src="data:image/svg+xml;base64,{svg_base64}" width="20" height="20" style="vertical-align: middle;" /><span>{text}</span></div>'
+
+    return html
+
+
+def get_source_name_text(source_key: str) -> str:
+    """
+    Возвращает только текст названия источника (без HTML)
+    
+    Args:
+        source_key: 'vk' или 'telegram'
+    
+    Returns:
+        Текст названия источника
+    """
+    texts = {
+        "vk": "ВКонтакте",
+        "telegram": "Телеграм",
+    }
+    return texts.get(source_key, source_key)
 
 
 # -----------------------------------------------------------------------------
@@ -667,13 +732,12 @@ def post_summary_section(
         # Проверяем какие площадки есть в данных
         if not df.empty:
             if "vk" in df["source"].values:
-                sources_to_show.append(("vk", "🔵 VK"))
+                sources_to_show.append(("vk", get_source_with_logo_html("vk")))
             if "telegram" in df["source"].values:
-                sources_to_show.append(("telegram", "✈️ Telegram"))
+                sources_to_show.append(("telegram", get_source_with_logo_html("telegram")))
     else:
         # Показываем только выбранную
-        source_names = {"vk": "🔵 VK", "telegram": "✈️ Telegram"}
-        sources_to_show.append((selected_source, source_names.get(selected_source, selected_source)))
+        sources_to_show.append((selected_source, get_source_with_logo_html(selected_source)))
     
     if not sources_to_show:
         st.info("Нет данных по постам.")
@@ -681,7 +745,7 @@ def post_summary_section(
     
     # Показываем секцию для каждой площадки
     for source_key, source_name in sources_to_show:
-        st.markdown(f"### {source_name}")
+        st.markdown(f'<h3>{source_name}</h3>', unsafe_allow_html=True)
         
         # Получаем highlights для этой площадки
         top_comment, top_negative, top_positive = post_highlights(df, source_key)
@@ -895,8 +959,8 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
         st.markdown("---")
         
         # Площадка
-        source_emoji = {"telegram": "✈️ Telegram", "vk": "🔵 VK"}
-        st.markdown(f"**Площадка:** {source_emoji.get(comment['source'], comment['source'])}")
+        source_logo = get_source_with_logo_html(comment['source'])
+        st.markdown(f"**Площадка:** {source_logo}", unsafe_allow_html=True)
         
         # Автор (со ссылкой если есть username)
         author_name = comment['author_name']
