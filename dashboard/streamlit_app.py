@@ -720,16 +720,16 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("🟢 Позитивный", key=f"pos_{comment_id}", use_container_width=True, type="primary"):
+            if st.button("🟢 Позитивный", key=f"pos_{comment_id}", use_container_width=True):
                 if update_sentiment_via_api(
                     api_url, comment_id, "positive", 
                     api_username, api_password
                 ):
-                    # Удаляем из списка и переходим к следующему
+                    # Удаляем из списка, индекс остается тем же
                     st.session_state["undefined_comments"].pop(current_idx)
-                    # Индекс остается тем же, так как следующий элемент сдвинулся на место текущего
-                    if current_idx >= len(st.session_state["undefined_comments"]):
-                        st.session_state["current_comment_index"] = max(0, len(st.session_state["undefined_comments"]) - 1)
+                    # Корректируем индекс если вышли за пределы
+                    if current_idx >= len(st.session_state["undefined_comments"]) and current_idx > 0:
+                        st.session_state["current_comment_index"] = current_idx - 1
                     st.toast("✅ Позитивный")
                     st.rerun()
         
@@ -740,20 +740,20 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
                     api_username, api_password
                 ):
                     st.session_state["undefined_comments"].pop(current_idx)
-                    if current_idx >= len(st.session_state["undefined_comments"]):
-                        st.session_state["current_comment_index"] = max(0, len(st.session_state["undefined_comments"]) - 1)
+                    if current_idx >= len(st.session_state["undefined_comments"]) and current_idx > 0:
+                        st.session_state["current_comment_index"] = current_idx - 1
                     st.toast("✅ Нейтральный")
                     st.rerun()
         
         with col3:
-            if st.button("🔴 Негативный", key=f"neg_{comment_id}", use_container_width=True, type="primary"):
+            if st.button("🔴 Негативный", key=f"neg_{comment_id}", use_container_width=True):
                 if update_sentiment_via_api(
                     api_url, comment_id, "negative",
                     api_username, api_password
                 ):
                     st.session_state["undefined_comments"].pop(current_idx)
-                    if current_idx >= len(st.session_state["undefined_comments"]):
-                        st.session_state["current_comment_index"] = max(0, len(st.session_state["undefined_comments"]) - 1)
+                    if current_idx >= len(st.session_state["undefined_comments"]) and current_idx > 0:
+                        st.session_state["current_comment_index"] = current_idx - 1
                     st.toast("✅ Негативный")
                     st.rerun()
         
