@@ -238,16 +238,27 @@ class PostSummary:
     negative_count: int
 
 
-def post_highlights(df: pd.DataFrame) -> Tuple[Optional[PostSummary], Optional[PostSummary]]:
+def post_highlights(df: pd.DataFrame, source: Optional[str] = None) -> Tuple[Optional[PostSummary], Optional[PostSummary]]:
     """
-    Determine posts with most comments and most negative comments.
+    Determine posts with most comments and most negative comments for a specific source.
 
+    Args:
+        df: DataFrame with comments
+        source: 'vk', 'telegram', or None for all
+        
     Returns
     -------
     tuple(PostSummary | None, PostSummary | None)
         First item is the post with the highest total comment count.
         Second item is the post with the highest negative comment count.
     """
+    if df.empty:
+        return None, None
+    
+    # Filter by source if specified
+    if source and source != "all":
+        df = df[df["source"] == source]
+    
     if df.empty:
         return None, None
 
@@ -284,6 +295,54 @@ def post_highlights(df: pd.DataFrame) -> Tuple[Optional[PostSummary], Optional[P
     )
 
     return top_comment, top_negative
+
+
+def calculate_period_change(
+    engine: Engine,
+    date_range: Tuple[datetime, datetime],
+    source: Optional[str] = None,
+    metric: str = "total"
+) -> Optional[int]:
+    """
+    Вычисляет изменение метрики относительно предыдущего аналогичного периода
+    
+    Args:
+        engine: SQLAlchemy engine
+        date_range: Текущий период (start, end)
+        source: 'vk', 'telegram', или None для всех
+        metric: 'total' для всех комментариев, 'negative' для негативных
+        
+    Returns:
+        Изменение в процентах (положительное или отрицательное) или None
+    """
+    start_dt, end_dt = date_range
+    period_length = (end_dt - start_dt).days + 1  # +1 чтобы включить оба дня
+    
+    # Предыдущий период (такой же длины)
+    prev_end = start_dt - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=period_length - 1)
+    
+    # Получаем данные за текущий период
+    current_df = fetch_comments_dataframe(engine, date_range, source)
+    
+    # Получаем данные за предыдущий период
+    prev_df = fetch_comments_dataframe(engine, (prev_start, prev_end), source)
+    
+    if metric == "total":
+        current_count = len(current_df)
+        prev_count = len(prev_df)
+    elif metric == "negative":
+        current_count = len(current_df[current_df["sentiment"] == "negative"]) if not current_df.empty else 0
+        prev_count = len(prev_df[prev_df["sentiment"] == "negative"]) if not prev_df.empty else 0
+    else:
+        return None
+    
+    if prev_count == 0:
+        return None  # Нет данных для сравнения
+    
+    # Возвращаем абсолютное изменение
+    change = current_count - prev_count
+    return change
 
 
 def prepare_raw_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -482,36 +541,91 @@ def daily_histogram_section(df: pd.DataFrame) -> None:
     st.altair_chart(chart, use_container_width=True)
 
 
-def post_summary_section(df: pd.DataFrame) -> None:
+def post_summary_section(
+    df: pd.DataFrame, 
+    engine: Engine,
+    selected_range: Tuple[datetime, datetime],
+    selected_source: str
+) -> None:
+    """
+    Показывает лидеров по постам с разделением по площадкам
+    
+    Args:
+        df: DataFrame с комментариями
+        engine: SQLAlchemy engine для запросов к БД
+        selected_range: Выбранный период
+        selected_source: 'all', 'vk' или 'telegram'
+    """
     st.subheader("Лидеры по постам")
-    top_comment, top_negative = post_highlights(df)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("**Больше всего комментариев**")
-        if top_comment:
-            st.metric(
-                label=top_comment.group_channel_name,
-                value=f"{top_comment.comment_count} комментариев",
-                delta=f"{top_comment.negative_count} негативных",
-                delta_color="inverse",
-            )
-            st.markdown(f"[Перейти к посту]({top_comment.post_url})")
-        else:
-            st.info("Нет данных по постам.")
-
-    with col2:
-        st.markdown("**Больше всего негатива**")
-        if top_negative:
-            st.metric(
-                label=top_negative.group_channel_name,
-                value=f"{top_negative.negative_count} негативных",
-                delta=f"{top_negative.comment_count} всего",
-            )
-            st.markdown(f"[Перейти к посту]({top_negative.post_url})")
-        else:
-            st.info("Нет данных по негативным комментариям.")
+    
+    # Определяем какие площадки показывать
+    sources_to_show = []
+    if selected_source == "all":
+        # Проверяем какие площадки есть в данных
+        if not df.empty:
+            if "vk" in df["source"].values:
+                sources_to_show.append(("vk", "🔵 VK"))
+            if "telegram" in df["source"].values:
+                sources_to_show.append(("telegram", "✈️ Telegram"))
+    else:
+        # Показываем только выбранную
+        source_names = {"vk": "🔵 VK", "telegram": "✈️ Telegram"}
+        sources_to_show.append((selected_source, source_names.get(selected_source, selected_source)))
+    
+    if not sources_to_show:
+        st.info("Нет данных по постам.")
+        return
+    
+    # Показываем секцию для каждой площадки
+    for source_key, source_name in sources_to_show:
+        st.markdown(f"### {source_name}")
+        
+        # Получаем highlights для этой площадки
+        top_comment, top_negative = post_highlights(df, source_key)
+        
+        # Рассчитываем изменения относительно прошлого периода
+        comment_change = calculate_period_change(engine, selected_range, source_key, "total")
+        negative_change = calculate_period_change(engine, selected_range, source_key, "negative")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Больше всего комментариев**")
+            if top_comment:
+                st.metric(
+                    label=top_comment.group_channel_name,
+                    value=f"{top_comment.comment_count}",
+                    delta=comment_change,
+                    help="Учитываются только прямые комментарии к постам (без ответов на комментарии)",
+                )
+                st.link_button(
+                    "🔗 Перейти к посту",
+                    top_comment.post_url,
+                    use_container_width=True
+                )
+            else:
+                st.info("Нет данных.")
+        
+        with col2:
+            st.markdown("**Больше всего негатива**")
+            if top_negative:
+                st.metric(
+                    label=top_negative.group_channel_name,
+                    value=f"{top_negative.negative_count}",
+                    delta=negative_change,
+                    delta_color="inverse",
+                )
+                st.link_button(
+                    "🔗 Перейти к посту",
+                    top_negative.post_url,
+                    use_container_width=True
+                )
+            else:
+                st.info("Нет данных.")
+        
+        # Разделитель между площадками (если их несколько)
+        if len(sources_to_show) > 1 and source_key != sources_to_show[-1][0]:
+            st.markdown("---")
 
 
 def raw_data_section(df: pd.DataFrame) -> None:
@@ -844,7 +958,7 @@ def main() -> None:
 
     kpi_section(df)
     daily_histogram_section(df)
-    post_summary_section(df)
+    post_summary_section(df, engine, selected_range, selected_source)
     
     # Секция ручной разметки
     st.markdown("---")
