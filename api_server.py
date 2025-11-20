@@ -76,6 +76,8 @@ class CommentResponse(BaseModel):
     group_channel_name: str
     author_name: str
     comment_text: str
+    has_media: int
+    media_type: Optional[str] = None
     sentiment: Optional[str] = None
     sentiment_score: Optional[float] = None
     comment_published_at: datetime
@@ -313,5 +315,6 @@ if __name__ == "__main__":
         reload=False,
         log_level="info"
     )
+
 
 
