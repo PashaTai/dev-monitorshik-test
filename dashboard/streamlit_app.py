@@ -615,16 +615,11 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
     current_idx = st.session_state["current_comment_index"]
     total_count = len(undefined_comments)
     
-    # Если индекс вышел за пределы
-    if current_idx >= total_count:
-        st.success(f"✅ Все {total_count} комментариев просмотрены!")
-        if st.button("🔄 Обновить список", use_container_width=True):
-            st.session_state["need_reload"] = True
-            st.rerun()
-        return
-
     comment = undefined_comments[current_idx]
     comment_id = comment['id']
+    
+    # Проверяем не последний ли это комментарий и не размечен ли он уже
+    is_last = (current_idx == total_count - 1)
     
     # Прогресс бар
     st.progress(
@@ -725,9 +720,12 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
                     api_url, comment_id, "positive", 
                     api_username, api_password
                 ):
-                    # Переходим к следующему (НЕ удаляем из списка)
-                    st.session_state["current_comment_index"] = min(current_idx + 1, total_count - 1)
                     st.toast("✅ Позитивный")
+                    # Если это был последний - показываем успех и перезагружаем список
+                    if is_last:
+                        st.session_state["need_reload"] = True
+                    else:
+                        st.session_state["current_comment_index"] = current_idx + 1
                     st.rerun()
         
         with col2:
@@ -736,8 +734,11 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
                     api_url, comment_id, "neutral",
                     api_username, api_password
                 ):
-                    st.session_state["current_comment_index"] = min(current_idx + 1, total_count - 1)
                     st.toast("✅ Нейтральный")
+                    if is_last:
+                        st.session_state["need_reload"] = True
+                    else:
+                        st.session_state["current_comment_index"] = current_idx + 1
                     st.rerun()
         
         with col3:
@@ -746,8 +747,11 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
                     api_url, comment_id, "negative",
                     api_username, api_password
                 ):
-                    st.session_state["current_comment_index"] = min(current_idx + 1, total_count - 1)
                     st.toast("✅ Негативный")
+                    if is_last:
+                        st.session_state["need_reload"] = True
+                    else:
+                        st.session_state["current_comment_index"] = current_idx + 1
                     st.rerun()
         
         # Навигация (Предыдущий / Следующий)
