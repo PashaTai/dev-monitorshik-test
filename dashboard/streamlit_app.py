@@ -297,20 +297,62 @@ def post_highlights(df: pd.DataFrame, source: Optional[str] = None) -> Tuple[Opt
     return top_comment, top_negative
 
 
-def calculate_period_change(
+def get_top_post_metric(
     engine: Engine,
     date_range: Tuple[datetime, datetime],
     source: Optional[str] = None,
     metric: str = "total"
 ) -> Optional[int]:
     """
-    Вычисляет изменение метрики относительно предыдущего аналогичного периода
+    Получает метрику топ-поста за период
+    
+    Args:
+        engine: SQLAlchemy engine
+        date_range: Период (start, end)
+        source: 'vk', 'telegram', или None для всех
+        metric: 'total' для комментариев, 'negative' для негативных
+        
+    Returns:
+        Значение метрики топ-поста или None
+    """
+    df = fetch_comments_dataframe(engine, date_range, source)
+    
+    if df.empty:
+        return None
+    
+    # Группируем по постам
+    grouped = df.groupby(["post_url", "group_channel_name"]).agg(
+        comment_count=("id", "count"),
+        negative_count=("sentiment", lambda s: (s == "negative").sum()),
+    ).reset_index()
+    
+    if grouped.empty:
+        return None
+    
+    if metric == "total":
+        top_value = int(grouped["comment_count"].max())
+    elif metric == "negative":
+        top_value = int(grouped["negative_count"].max())
+    else:
+        return None
+    
+    return top_value if top_value > 0 else None
+
+
+def calculate_top_post_change(
+    engine: Engine,
+    date_range: Tuple[datetime, datetime],
+    source: Optional[str] = None,
+    metric: str = "total"
+) -> Optional[int]:
+    """
+    Вычисляет изменение метрики топ-поста относительно топ-поста предыдущего периода
     
     Args:
         engine: SQLAlchemy engine
         date_range: Текущий период (start, end)
         source: 'vk', 'telegram', или None для всех
-        metric: 'total' для всех комментариев, 'negative' для негативных
+        metric: 'total' для комментариев, 'negative' для негативных
         
     Returns:
         Абсолютное изменение (положительное или отрицательное) или None
@@ -333,26 +375,15 @@ def calculate_period_change(
         prev_end = start_dt - timedelta(days=1)
         prev_start = prev_end - timedelta(days=period_length - 1)
     
-    # Получаем данные за текущий период
-    current_df = fetch_comments_dataframe(engine, date_range, source)
+    # Получаем метрики топ-постов
+    current_top = get_top_post_metric(engine, date_range, source, metric)
+    prev_top = get_top_post_metric(engine, (prev_start, prev_end), source, metric)
     
-    # Получаем данные за предыдущий период
-    prev_df = fetch_comments_dataframe(engine, (prev_start, prev_end), source)
-    
-    if metric == "total":
-        current_count = len(current_df)
-        prev_count = len(prev_df)
-    elif metric == "negative":
-        current_count = len(current_df[current_df["sentiment"] == "negative"]) if not current_df.empty else 0
-        prev_count = len(prev_df[prev_df["sentiment"] == "negative"]) if not prev_df.empty else 0
-    else:
-        return None
-    
-    if prev_count == 0 and current_count == 0:
+    if current_top is None or prev_top is None:
         return None  # Нет данных для сравнения
     
     # Возвращаем абсолютное изменение
-    change = current_count - prev_count
+    change = current_top - prev_top
     return change
 
 
@@ -567,7 +598,7 @@ def post_summary_section(
         selected_range: Выбранный период
         selected_source: 'all', 'vk' или 'telegram'
     """
-    st.subheader("Лидеры по постам")
+    st.subheader("Лидеры по количеству комментариев и негатива")
     
     # Определяем какие площадки показывать
     sources_to_show = []
@@ -594,9 +625,9 @@ def post_summary_section(
         # Получаем highlights для этой площадки
         top_comment, top_negative = post_highlights(df, source_key)
         
-        # Рассчитываем изменения относительно прошлого периода
-        comment_change = calculate_period_change(engine, selected_range, source_key, "total")
-        negative_change = calculate_period_change(engine, selected_range, source_key, "negative")
+        # Рассчитываем изменения топ-постов относительно прошлого периода
+        comment_change = calculate_top_post_change(engine, selected_range, source_key, "total")
+        negative_change = calculate_top_post_change(engine, selected_range, source_key, "negative")
         
         col1, col2 = st.columns(2)
         
@@ -609,7 +640,7 @@ def post_summary_section(
                         label=top_comment.group_channel_name,
                         value=f"{top_comment.comment_count}",
                         delta=comment_change,
-                        help="Учитываются только прямые комментарии к постам (без ответов на комментарии). Delta показывает изменение общего количества комментариев за период.",
+                        help="Учитываются только прямые комментарии к постам (без ответов на комментарии). Delta показывает изменение относительно топ-поста предыдущего аналогичного периода.",
                     )
                 else:
                     st.metric(
@@ -635,7 +666,7 @@ def post_summary_section(
                         value=f"{top_negative.negative_count}",
                         delta=negative_change,
                         delta_color="inverse",
-                        help="Delta показывает изменение общего количества негативных комментариев за период.",
+                        help="Delta показывает изменение относительно топ-поста по негативу предыдущего аналогичного периода.",
                     )
                 else:
                     st.metric(
