@@ -725,11 +725,8 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
                     api_url, comment_id, "positive", 
                     api_username, api_password
                 ):
-                    # Удаляем из списка, индекс остается тем же
-                    st.session_state["undefined_comments"].pop(current_idx)
-                    # Корректируем индекс если вышли за пределы
-                    if current_idx >= len(st.session_state["undefined_comments"]) and current_idx > 0:
-                        st.session_state["current_comment_index"] = current_idx - 1
+                    # Переходим к следующему (НЕ удаляем из списка)
+                    st.session_state["current_comment_index"] = min(current_idx + 1, total_count - 1)
                     st.toast("✅ Позитивный")
                     st.rerun()
         
@@ -739,9 +736,7 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
                     api_url, comment_id, "neutral",
                     api_username, api_password
                 ):
-                    st.session_state["undefined_comments"].pop(current_idx)
-                    if current_idx >= len(st.session_state["undefined_comments"]) and current_idx > 0:
-                        st.session_state["current_comment_index"] = current_idx - 1
+                    st.session_state["current_comment_index"] = min(current_idx + 1, total_count - 1)
                     st.toast("✅ Нейтральный")
                     st.rerun()
         
@@ -751,9 +746,7 @@ def manual_labeling_section(selected_range: Tuple[datetime, datetime]) -> None:
                     api_url, comment_id, "negative",
                     api_username, api_password
                 ):
-                    st.session_state["undefined_comments"].pop(current_idx)
-                    if current_idx >= len(st.session_state["undefined_comments"]) and current_idx > 0:
-                        st.session_state["current_comment_index"] = current_idx - 1
+                    st.session_state["current_comment_index"] = min(current_idx + 1, total_count - 1)
                     st.toast("✅ Негативный")
                     st.rerun()
         
