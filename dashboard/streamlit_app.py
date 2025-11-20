@@ -469,6 +469,12 @@ def sidebar_controls(default_db_path: Path) -> tuple[Path, tuple[datetime, datet
         default_start = min_date
         default_end = max_date
 
+    # Инициализация session state для выбранного периода
+    if "selected_period" not in st.session_state:
+        st.session_state["selected_period"] = (default_start.date(), default_end.date())
+    if "active_quick_button" not in st.session_state:
+        st.session_state["active_quick_button"] = None
+
     # Быстрые кнопки выбора периода
     st.sidebar.markdown("**Быстрый выбор периода:**")
     
@@ -482,33 +488,42 @@ def sidebar_controls(default_db_path: Path) -> tuple[Path, tuple[datetime, datet
         ("12 месяцев", 365),
     ]
     
-    # Проверяем доступность периодов
-    selected_quick_period = None
+    # Проверяем доступность периодов и обрабатываем клики
     for period_name, days in quick_periods:
         period_start = now - timedelta(days=days)
         period_start_date = period_start.date()
         
         # Проверяем есть ли данные за этот период
-        has_data = min_date is None or period_start_date <= max_date.date()
+        # Период доступен если его начало >= min_date в БД
+        has_data = min_date is None or period_start_date >= min_date.date()
+        
+        # Определяем активна ли эта кнопка
+        is_active = st.session_state["active_quick_button"] == days
         
         if st.sidebar.button(
             period_name,
             key=f"quick_{days}",
             disabled=not has_data,
-            use_container_width=True
+            use_container_width=True,
+            type="primary" if is_active else "secondary"
         ):
-            selected_quick_period = (period_start_date, now.date())
+            # Устанавливаем период
+            st.session_state["selected_period"] = (period_start_date, now.date())
+            st.session_state["active_quick_button"] = days
+            st.rerun()
     
-    # Выбор периода через date_input
-    if selected_quick_period:
-        period = selected_quick_period
-    else:
-        period = st.sidebar.date_input(
-            "Период комментариев",
-            value=(default_start.date(), default_end.date()),
-            min_value=(min_date.date() if min_date else None),
-            max_value=(max_date.date() if max_date else None),
-        )
+    # Выбор периода через date_input (всегда видимый)
+    period = st.sidebar.date_input(
+        "Период комментариев",
+        value=st.session_state["selected_period"],
+        min_value=(min_date.date() if min_date else None),
+        max_value=(max_date.date() if max_date else None),
+    )
+    
+    # Если период изменился через date_input - сбрасываем активную кнопку
+    if period != st.session_state["selected_period"]:
+        st.session_state["selected_period"] = period
+        st.session_state["active_quick_button"] = None
 
     if isinstance(period, tuple):
         if len(period) == 2:
