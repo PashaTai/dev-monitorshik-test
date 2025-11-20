@@ -238,9 +238,9 @@ class PostSummary:
     negative_count: int
 
 
-def post_highlights(df: pd.DataFrame, source: Optional[str] = None) -> Tuple[Optional[PostSummary], Optional[PostSummary]]:
+def post_highlights(df: pd.DataFrame, source: Optional[str] = None) -> Tuple[Optional[PostSummary], Optional[PostSummary], Optional[PostSummary]]:
     """
-    Determine posts with most comments and most negative comments for a specific source.
+    Determine posts with most comments, most negative, and most positive comments for a specific source.
 
     Args:
         df: DataFrame with comments
@@ -248,19 +248,20 @@ def post_highlights(df: pd.DataFrame, source: Optional[str] = None) -> Tuple[Opt
         
     Returns
     -------
-    tuple(PostSummary | None, PostSummary | None)
+    tuple(PostSummary | None, PostSummary | None, PostSummary | None)
         First item is the post with the highest total comment count.
         Second item is the post with the highest negative comment count.
+        Third item is the post with the highest positive comment count.
     """
     if df.empty:
-        return None, None
+        return None, None, None
     
     # Filter by source if specified
     if source and source != "all":
         df = df[df["source"] == source]
     
     if df.empty:
-        return None, None
+        return None, None, None
 
     grouped = (
         df.groupby(["post_url", "group_channel_name"])
@@ -270,15 +271,20 @@ def post_highlights(df: pd.DataFrame, source: Optional[str] = None) -> Tuple[Opt
                 "sentiment",
                 lambda s: (s == "negative").sum(),
             ),
+            positive_count=(
+                "sentiment",
+                lambda s: (s == "positive").sum(),
+            ),
         )
         .reset_index()
     )
 
     if grouped.empty:
-        return None, None
+        return None, None, None
 
     top_comment_row = grouped.sort_values("comment_count", ascending=False).iloc[0]
     top_negative_row = grouped.sort_values("negative_count", ascending=False).iloc[0]
+    top_positive_row = grouped.sort_values("positive_count", ascending=False).iloc[0]
 
     top_comment = PostSummary(
         post_url=top_comment_row["post_url"],
@@ -294,7 +300,14 @@ def post_highlights(df: pd.DataFrame, source: Optional[str] = None) -> Tuple[Opt
         negative_count=int(top_negative_row["negative_count"]),
     )
 
-    return top_comment, top_negative
+    top_positive = PostSummary(
+        post_url=top_positive_row["post_url"],
+        group_channel_name=top_positive_row["group_channel_name"],
+        comment_count=int(top_positive_row["comment_count"]),
+        negative_count=int(top_positive_row["negative_count"]),
+    )
+
+    return top_comment, top_negative, top_positive
 
 
 def get_top_post_metric(
@@ -310,7 +323,7 @@ def get_top_post_metric(
         engine: SQLAlchemy engine
         date_range: Период (start, end)
         source: 'vk', 'telegram', или None для всех
-        metric: 'total' для комментариев, 'negative' для негативных
+        metric: 'total' для комментариев, 'negative' для негативных, 'positive' для позитивных
         
     Returns:
         Значение метрики топ-поста или None
@@ -324,6 +337,7 @@ def get_top_post_metric(
     grouped = df.groupby(["post_url", "group_channel_name"]).agg(
         comment_count=("id", "count"),
         negative_count=("sentiment", lambda s: (s == "negative").sum()),
+        positive_count=("sentiment", lambda s: (s == "positive").sum()),
     ).reset_index()
     
     if grouped.empty:
@@ -333,6 +347,8 @@ def get_top_post_metric(
         top_value = int(grouped["comment_count"].max())
     elif metric == "negative":
         top_value = int(grouped["negative_count"].max())
+    elif metric == "positive":
+        top_value = int(grouped["positive_count"].max())
     else:
         return None
     
@@ -598,7 +614,7 @@ def post_summary_section(
         selected_range: Выбранный период
         selected_source: 'all', 'vk' или 'telegram'
     """
-    st.subheader("Лидеры по количеству комментариев и негатива")
+    st.subheader("Лидеры по комментариям и тональности")
     
     # Определяем какие площадки показывать
     sources_to_show = []
@@ -623,13 +639,14 @@ def post_summary_section(
         st.markdown(f"### {source_name}")
         
         # Получаем highlights для этой площадки
-        top_comment, top_negative = post_highlights(df, source_key)
+        top_comment, top_negative, top_positive = post_highlights(df, source_key)
         
         # Рассчитываем изменения топ-постов относительно прошлого периода
         comment_change = calculate_top_post_change(engine, selected_range, source_key, "total")
         negative_change = calculate_top_post_change(engine, selected_range, source_key, "negative")
+        positive_change = calculate_top_post_change(engine, selected_range, source_key, "positive")
         
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             st.markdown("**Больше всего комментариев**")
@@ -676,6 +693,35 @@ def post_summary_section(
                 st.link_button(
                     "🔗 Перейти к посту",
                     top_negative.post_url,
+                    use_container_width=True
+                )
+            else:
+                st.info("Нет данных.")
+        
+        with col3:
+            st.markdown("**Больше всего позитива**")
+            if top_positive:
+                # Получаем количество позитивных комментариев для этого поста
+                source_df = df[df["source"] == source_key] if source_key != "all" else df
+                positive_df = source_df[(source_df["post_url"] == top_positive.post_url) & (source_df["sentiment"] == "positive")]
+                positive_count = len(positive_df) if not positive_df.empty else 0
+                
+                # Показываем метрику с delta только если есть данные для сравнения
+                if positive_change is not None:
+                    st.metric(
+                        label=top_positive.group_channel_name,
+                        value=f"{positive_count}",
+                        delta=positive_change,
+                        help="Delta показывает изменение относительно топ-поста по позитиву предыдущего аналогичного периода.",
+                    )
+                else:
+                    st.metric(
+                        label=top_positive.group_channel_name,
+                        value=f"{positive_count}",
+                    )
+                st.link_button(
+                    "🔗 Перейти к посту",
+                    top_positive.post_url,
                     use_container_width=True
                 )
             else:
